@@ -1,0 +1,39 @@
+#!/bin/bash
+set -e
+
+ROOT_PATH="/home/user/wuzhirong/MySoftwares"
+BIN_PATH="$ROOT_PATH/bin"
+DEB_PATH="$ROOT_PATH/debs"
+INSTALL_PATH="$ROOT_PATH/installs"
+
+# 检查是否传入了软件名参数
+if [ -z "$1" ]; then
+  echo "请提供软件名"
+  exit 1
+fi
+
+# 获取软件包名称
+SOFTWARE_NAME=$1
+
+# 下载软件包，但不安装
+echo "正在下载 $SOFTWARE_NAME ..."
+cd $DEB_PATH
+apt-get download "$SOFTWARE_NAME"
+DEB_NAME=$(find $DEB_PATH -type f -name "$SOFTWARE_NAME*.deb")
+echo "$DEB_NAME 下载完成。"
+
+echo "正在安装 $SOFTWARE_NAME ..."
+cd $INSTALL_PATH
+dpkg -x $DEB_NAME $SOFTWARE_NAME
+echo "安装成功"
+
+echo "创建链接..."
+SOURCE_DIR="$INSTALL_PATH/$SOFTWARE_NAME/usr/*bin"
+find $SOURCE_DIR -type f | while read -r file; do
+  # 获取文件的相对路径
+  relative_path="${file#$SOURCE_DIR/}"
+  echo $relative_path
+  # 创建目标文件夹中的软链接
+  ln -s "$file" "$BIN_PATH/$relative_path"
+done
+echo "完毕"
