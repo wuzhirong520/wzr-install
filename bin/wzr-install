@@ -1,0 +1,56 @@
+#!/bin/bash
+
+set -e
+
+# MIRROR_URL="https://mirrors.tuna.tsinghua.edu.cn/ubuntu/"
+# MIRROR_URL="https://mirrors.ustc.edu.cn/ubuntu/"
+MIRROR_URL="http://archive.ubuntu.com/ubuntu/"
+
+ROOT_PATH=$(dirname "$(realpath "$0")")
+ROOT_PATH="$ROOT_PATH/.."
+# echo "$ROOT_PATH"
+
+DEBS_PATH="$ROOT_PATH/debs"
+INSTALLS_PATH="$ROOT_PATH/installs"
+USR_PATH="$ROOT_PATH/usr"
+
+mkdir -p $DEBS_PATH
+mkdir -p $INSTALLS_PATH
+mkdir -p $USR_PATH
+
+PACKAGE_NAME=$1
+
+echo "Installing $PACKAGE_NAME"
+
+if [ -d "$INSTALLS_PATH/$PACKAGE_NAME" ]; then
+  echo "$PACKAGE_NAME 已安装"
+else
+  PACKAGE_INFO=$(apt-cache show "$PACKAGE_NAME" 2>/dev/null)
+  # echo "$PACKAGE_INFO"
+  DEB_FILE_PATH=$(echo "$PACKAGE_INFO" | grep -oP 'Filename: \K.*?\.deb' | head -n 1)
+  # echo "$DEB_FILE_PATH"
+  DEB_DOWNLOAD_URL="${MIRROR_URL}${DEB_FILE_PATH}"
+  DEB_SAVE_PATH="${DEBS_PATH}/$(basename "$DEB_FILE_PATH")"
+  wget "$DEB_DOWNLOAD_URL" -O "$DEB_SAVE_PATH" -e "http_proxy=http://219.223.194.13:7897"
+  PACKAGE_INSTALL_PATH="$INSTALLS_PATH/$PACKAGE_NAME"
+  dpkg -x "$DEB_SAVE_PATH" "$PACKAGE_INSTALL_PATH"
+  cp -r "$INSTALLS_PATH/$PACKAGE_NAME/usr/"* "$USR_PATH/"
+fi
+
+
+DEPENDENCIES=$(apt-cache depends "$PACKAGE_NAME" | grep "Depends" | awk '{print $2}')
+echo $DEPENDENCIES
+
+for dep in $DEPENDENCIES; do
+  # 检查软件包是否已经安装
+  if dpkg -l | grep -q "^ii  $dep "; then
+    echo "$dep 已安装"
+  else
+    if [ -d "$INSTALLS_PATH/$dep" ]; then
+        echo "$dep 已安装"
+    else
+        echo "$dep 未安装"
+        wzr-install $dep
+    fi
+  fi
+done
