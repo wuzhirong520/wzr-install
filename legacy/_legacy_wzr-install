@@ -41,6 +41,8 @@ fi
 DEPENDENCIES=$(apt-cache depends "$PACKAGE_NAME" | grep "Depends" | awk '{print $2}')
 echo $DEPENDENCIES
 
+exit
+
 for dep in $DEPENDENCIES; do
   # 检查软件包是否已经安装
   if dpkg -l | grep -q "^ii  $dep "; then

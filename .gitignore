@@ -1,3 +1,5 @@
 installs/*
-usr/*
+meta/*
 debs/*
+vm/*
+src/__pycache__/*

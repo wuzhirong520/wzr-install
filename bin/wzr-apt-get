@@ -1,0 +1,8 @@
+#!/bin/bash
+
+set -e
+
+WZR_DIR=$(dirname "$(realpath "$0")")
+WZR_DIR=$(dirname "$WZR_DIR")
+
+python3 $WZR_DIR/src/my_apt_get.py "$@"
