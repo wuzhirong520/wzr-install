@@ -3,6 +3,7 @@ import re
 import json
 from tqdm import tqdm
 from datetime import datetime
+import urllib.parse
 from utils import *
 
 class Package:
@@ -17,19 +18,33 @@ class Package:
         return s
 
 class Deb:
-    def __init__(self, package_name, version, filename, url):
+    def __init__(self, package_name, version, filename, url, depends = [], provides = []):
         self.package_name = package_name
         self.version = version
         self.filename = filename
         self.url = url
+        self.depends = depends
+        self.provides = provides
     def __str__(self):
-        s = f"Deb : {self.package_name}, version={self.version}, url={self.url}"
+        s = f"Deb : {self.package_name}, version={self.version}, url={self.url},"
+        if len(self.depends)>0:
+            s += " Depends="
+            for d in self.depends:
+                s += f"[{d}],"
+        if len(self.provides)>0 :
+            s += " Provides="
+            for p in self.provides:
+                s += f"[{p}],"
         return s
 
 class PackageInstaller:
     def __init__(self, is_load_meta=True, is_update_from_url = False):
         self.arch_name = "amd64"
+        self.ubuntu_name = "jammy"
+        self.channels = ["main", "multiverse", "restricted", "universe"]
         self.mirror_url = "https://mirrors.pku.edu.cn/ubuntu/"
+        # self.mirror_url = "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/"
+        # self.mirror_url = "http://mirrors.ustc.edu.cn/ubuntu/"
         self.root_path = os.path.dirname(os.path.dirname(__file__))
         self.meta_dir = os.path.join(self.root_path, "meta")
         self.debs_download_dir = os.path.join(self.root_path, "debs")
@@ -44,7 +59,7 @@ class PackageInstaller:
             self.update_meta_from_mirror_url()
         if is_load_meta:
             self.logging_section_bar("Loading Deb Meta Info")
-            self.debs_meta = self.get_all_debs_meta()
+            self.debs_meta, self.debs_provides_meta = self.get_all_debs_meta()
             self.sys_installed_debs = self.get_all_debs_system_installed()
             self.wzr_installed_debs = self.get_all_debs_wzr_installed()
             self.logging_section_end()
@@ -74,8 +89,80 @@ class PackageInstaller:
         print(f"[{formatted_datetime}] : ", end="")
         print(*args, **kwargs)
          
+    def parse_pacakges_string(self, depends_string):
+        deb_depends = []
+        depends = str(depends_string).split(', ')
+        depends = [d.split(' | ') for d in depends]
+        # print(depends)
+        for depend in depends:
+            depend_package_name = depend[0].split(' ')[0]
+            depend_package_name = str(depend_package_name).replace(":any","")
+            depend_version_strings = re.findall(r'\((.*?)\)', depend[0])
+            depend_version_string = depend_version_strings[0] if len(depend_version_strings)>0 else None
+            depend_package = Package(depend_package_name)
+            if depend_version_string is not None:
+                depend_version_info = depend_version_string.split(' ')
+                depend_package.version = depend_version_info[1]
+                depend_package.version_cmp = depend_version_info[0]
+            # print(depend_package_name, depend_version_strings)
+            deb_depends.append(depend_package)
+        return deb_depends
+
     def get_all_debs_meta(self):
+        self.logging("Loading all debs from mirror...")
         debs_meta = {}
+        debs_provides_meta = {}
+        n = 0
+        n_provides = 0
+        for channel in self.channels:
+            meta_file_path = os.path.join(self.meta_dir, f"{self.ubuntu_name}/{channel}")
+            with open(meta_file_path, "r") as f:
+                while True:
+                    line = f.readline()
+                    if line=="":
+                        break
+                    line = line[:-1]
+                    if line.startswith("Package: "):
+                        package_name = line[9:]
+                        deb_depends = []
+                        provides = []
+                        version = ""
+                        url = ""
+                        while True:
+                            line = f.readline()
+                            if line=="\n" or line=="":
+                                break
+                            line = line[:-1]
+                            if line.startswith("Version: "):
+                                version = line[9:]
+                            if line.startswith("Filename: "):
+                                url = line[10:]
+                            if line.startswith("Depends: "):
+                                depends_string = line[9:]
+                                deb_depends = self.parse_pacakges_string(depends_string)
+                            if line.startswith("Provides: "):
+                                provides_string = line[10:]
+                                provides = self.parse_pacakges_string(provides_string)
+                        filename = url.split('/')[-1]
+                        deb = Deb(package_name, version, filename, url, deb_depends, provides)
+                        # print(deb)
+                        if package_name not in debs_meta.keys():
+                            debs_meta[package_name]=[]
+                        debs_meta[package_name].append(deb)
+                        n += 1
+                        for p in provides:
+                            if p.package_name not in debs_provides_meta.keys():
+                                debs_provides_meta[p.package_name] = []
+                            debs_provides_meta[p.package_name].append(
+                                {
+                                    "version" : p.version,
+                                    "package" : Package(package_name, version, version_cmp="=")
+                                }
+                            )
+                            n_provides += 1
+        self.logging(f"Loaded {len(debs_meta)} packages, {n} deb files, provides {n_provides} packages")
+        return debs_meta, debs_provides_meta
+
         base_url = ""
         meta_file_path = os.path.join(self.meta_dir,"ls-lR")
         if not os.path.exists(meta_file_path):
@@ -163,6 +250,8 @@ class PackageInstaller:
         if package.package_name not in self.debs_meta.keys():
             return None
         debs_of_package = self.debs_meta[package.package_name]
+        for d in debs_of_package:
+            print(d)
         selected_debs = []
         if package.version is not None and package.version_cmp is not None:
             for deb in debs_of_package:
@@ -182,10 +271,10 @@ class PackageInstaller:
         
     def check_installed(self, package : Package):
         if package.package_name not in self.wzr_installed_debs.keys():
+            return False
             if package.package_name not in self.sys_installed_debs.keys():
                 return False
             return self.check_deb_version(self.sys_installed_debs[package.package_name], package)
-            return True
         else:
             return self.check_deb_version(self.wzr_installed_debs[package.package_name], package)
 
@@ -196,7 +285,7 @@ class PackageInstaller:
             download_file_with_progress(self.mirror_url+deb.url, deb_download_path)
             res = run_command(f"dpkg-deb --info \'{deb_download_path}\'")
         return res
-
+    
     def get_debs_to_install(self, package : Package, debs_to_install : dict = {}, no_found_packages : list = []):
         if package.package_name in debs_to_install.keys():
             if self.check_deb_version(debs_to_install[package.package_name], package):
@@ -206,30 +295,17 @@ class PackageInstaller:
         self.logging(f"{package} Not Installed")
         deb = self.get_deb_of_package(package)
         if deb is None:
+            if package.package_name in self.debs_provides_meta.keys():
+                p = self.debs_provides_meta[package.package_name][0]['package']
+                return self.get_debs_to_install(p,debs_to_install,no_found_packages)
+        if deb is None:
             no_found_packages.append(package)
             self.logging(f"Error {package} Is Not Found !!!")
             return debs_to_install, no_found_packages
         debs_to_install[package.package_name] = deb
-        res = self.get_deb_info(deb)
-        # print(res)
-        depends_strings = re.findall(r'Depends: (.*?)\n', res)
-        if len(depends_strings) > 0:
-            depends_string = depends_strings[0]
-            depends = str(depends_string).split(', ')
-            depends = [d.split(' | ') for d in depends]
-            # print(depends)
-            for depend in depends:
-                depend_package_name = depend[0].split(' ')[0]
-                depend_version_strings = re.findall(r'\((.*?)\)', depend[0])
-                depend_version_string = depend_version_strings[0] if len(depend_version_strings)>0 else None
-                depend_package = Package(depend_package_name)
-                if depend_version_string is not None:
-                    depend_version_info = depend_version_string.split(' ')
-                    depend_package.version = depend_version_info[1]
-                    depend_package.version_cmp = depend_version_info[0]
-                    depend_package.version = depend_package.version.split(':')[-1]
-                # print(depend_package_name, depend_version_strings)
-                debs_to_install, no_found_packages = self.get_debs_to_install(depend_package, debs_to_install, no_found_packages)
+        info = self.get_deb_info(deb)
+        for depends in deb.depends:
+            debs_to_install, no_found_packages = self.get_debs_to_install(depends, debs_to_install, no_found_packages)
         return debs_to_install, no_found_packages
     
     def uninstall_deb(self, package_name):
@@ -306,7 +382,17 @@ class PackageInstaller:
 
     def update_meta_from_mirror_url(self):
         self.logging_section_bar("Updating Meta Info from Mirror URL")
-        meta_gz_file_name = "ls-lR.gz"
-        download_file_with_progress(self.mirror_url + meta_gz_file_name, os.path.join(self.meta_dir, meta_gz_file_name))
-        os.system(f"gzip -df {os.path.join(self.meta_dir, meta_gz_file_name)}")
+        # meta_gz_file_name = "ls-lR.gz"
+        # download_file_with_progress(self.mirror_url + meta_gz_file_name, os.path.join(self.meta_dir, meta_gz_file_name))
+        # os.system(f"gzip -df {os.path.join(self.meta_dir, meta_gz_file_name)}")
+        meta_save_dir = os.path.join(self.meta_dir,self.ubuntu_name)
+        os.makedirs(meta_save_dir, exist_ok=True)
+        for channel in self.channels:
+            meta_url = self.mirror_url + "dists/" + self.ubuntu_name + "/" + channel + "/binary-" + self.arch_name + "/Packages.gz"
+            # print(meta_url)
+            meta_save_path = os.path.join(meta_save_dir, f"{channel}.gz")
+            # print(meta_save_path)
+            download_file_with_progress(meta_url, meta_save_path)
+            os.system(f"gzip -df {meta_save_path}")
+        
         self.logging_section_end()
