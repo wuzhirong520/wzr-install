@@ -46,6 +46,8 @@ current_env["C_INCLUDE_PATH"] += ":" + os.path.join(root_path,"vm/usr/lib/x86_64
 current_env["CPLUS_INCLUDE_PATH"] += ":" + os.path.join(root_path,"vm/usr/lib/x86_64-linux-gnu/glib-2.0/include")
 
 def add_include(include_path):
+    if not os.path.exists(include_path):
+        return
     for entry in os.scandir(include_path):
         if entry.is_dir():
             include_path_ = entry.path

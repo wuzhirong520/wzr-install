@@ -40,10 +40,11 @@ class Deb:
 class PackageInstaller:
     def __init__(self, is_load_meta=True, is_update_from_url = False):
         self.arch_name = "amd64"
-        self.ubuntu_name = "jammy"
+        # self.ubuntu_names = ["jammy","jammy-backports", "jammy-proposed", "jammy-security", "jammy-updates"]
+        self.ubuntu_names = ["jammy"]
         self.channels = ["main", "multiverse", "restricted", "universe"]
-        self.mirror_url = "https://mirrors.pku.edu.cn/ubuntu/"
-        # self.mirror_url = "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/"
+        # self.mirror_url = "https://mirrors.pku.edu.cn/ubuntu/"
+        self.mirror_url = "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/"
         # self.mirror_url = "http://mirrors.ustc.edu.cn/ubuntu/"
         self.root_path = os.path.dirname(os.path.dirname(__file__))
         self.meta_dir = os.path.join(self.root_path, "meta")
@@ -114,52 +115,53 @@ class PackageInstaller:
         debs_provides_meta = {}
         n = 0
         n_provides = 0
-        for channel in self.channels:
-            meta_file_path = os.path.join(self.meta_dir, f"{self.ubuntu_name}/{channel}")
-            with open(meta_file_path, "r") as f:
-                while True:
-                    line = f.readline()
-                    if line=="":
-                        break
-                    line = line[:-1]
-                    if line.startswith("Package: "):
-                        package_name = line[9:]
-                        deb_depends = []
-                        provides = []
-                        version = ""
-                        url = ""
-                        while True:
-                            line = f.readline()
-                            if line=="\n" or line=="":
-                                break
-                            line = line[:-1]
-                            if line.startswith("Version: "):
-                                version = line[9:]
-                            if line.startswith("Filename: "):
-                                url = line[10:]
-                            if line.startswith("Depends: "):
-                                depends_string = line[9:]
-                                deb_depends = self.parse_pacakges_string(depends_string)
-                            if line.startswith("Provides: "):
-                                provides_string = line[10:]
-                                provides = self.parse_pacakges_string(provides_string)
-                        filename = url.split('/')[-1]
-                        deb = Deb(package_name, version, filename, url, deb_depends, provides)
-                        # print(deb)
-                        if package_name not in debs_meta.keys():
-                            debs_meta[package_name]=[]
-                        debs_meta[package_name].append(deb)
-                        n += 1
-                        for p in provides:
-                            if p.package_name not in debs_provides_meta.keys():
-                                debs_provides_meta[p.package_name] = []
-                            debs_provides_meta[p.package_name].append(
-                                {
-                                    "version" : p.version,
-                                    "package" : Package(package_name, version, version_cmp="=")
-                                }
-                            )
-                            n_provides += 1
+        for ubuntu_name in self.ubuntu_names:
+            for channel in self.channels:
+                meta_file_path = os.path.join(self.meta_dir, f"{ubuntu_name}/{channel}")
+                with open(meta_file_path, "r") as f:
+                    while True:
+                        line = f.readline()
+                        if line=="":
+                            break
+                        line = line[:-1]
+                        if line.startswith("Package: "):
+                            package_name = line[9:]
+                            deb_depends = []
+                            provides = []
+                            version = ""
+                            url = ""
+                            while True:
+                                line = f.readline()
+                                if line=="\n" or line=="":
+                                    break
+                                line = line[:-1]
+                                if line.startswith("Version: "):
+                                    version = line[9:]
+                                if line.startswith("Filename: "):
+                                    url = line[10:]
+                                if line.startswith("Depends: "):
+                                    depends_string = line[9:]
+                                    deb_depends = self.parse_pacakges_string(depends_string)
+                                if line.startswith("Provides: "):
+                                    provides_string = line[10:]
+                                    provides = self.parse_pacakges_string(provides_string)
+                            filename = url.split('/')[-1]
+                            deb = Deb(package_name, version, filename, url, deb_depends, provides)
+                            # print(deb)
+                            if package_name not in debs_meta.keys():
+                                debs_meta[package_name]=[]
+                            debs_meta[package_name].append(deb)
+                            n += 1
+                            for p in provides:
+                                if p.package_name not in debs_provides_meta.keys():
+                                    debs_provides_meta[p.package_name] = []
+                                debs_provides_meta[p.package_name].append(
+                                    {
+                                        "version" : p.version,
+                                        "package" : Package(package_name, version, version_cmp="=")
+                                    }
+                                )
+                                n_provides += 1
         self.logging(f"Loaded {len(debs_meta)} packages, {n} deb files, provides {n_provides} packages")
         return debs_meta, debs_provides_meta
 
@@ -385,14 +387,15 @@ class PackageInstaller:
         # meta_gz_file_name = "ls-lR.gz"
         # download_file_with_progress(self.mirror_url + meta_gz_file_name, os.path.join(self.meta_dir, meta_gz_file_name))
         # os.system(f"gzip -df {os.path.join(self.meta_dir, meta_gz_file_name)}")
-        meta_save_dir = os.path.join(self.meta_dir,self.ubuntu_name)
-        os.makedirs(meta_save_dir, exist_ok=True)
-        for channel in self.channels:
-            meta_url = self.mirror_url + "dists/" + self.ubuntu_name + "/" + channel + "/binary-" + self.arch_name + "/Packages.gz"
-            # print(meta_url)
-            meta_save_path = os.path.join(meta_save_dir, f"{channel}.gz")
-            # print(meta_save_path)
-            download_file_with_progress(meta_url, meta_save_path)
-            os.system(f"gzip -df {meta_save_path}")
+        for ubuntu_name in self.ubuntu_names:
+            meta_save_dir = os.path.join(self.meta_dir,ubuntu_name)
+            os.makedirs(meta_save_dir, exist_ok=True)
+            for channel in self.channels:
+                meta_url = self.mirror_url + "dists/" + ubuntu_name + "/" + channel + "/binary-" + self.arch_name + "/Packages.gz"
+                # print(meta_url)
+                meta_save_path = os.path.join(meta_save_dir, f"{channel}.gz")
+                # print(meta_save_path)
+                download_file_with_progress(meta_url, meta_save_path)
+                os.system(f"gzip -df {meta_save_path}")
         
         self.logging_section_end()
